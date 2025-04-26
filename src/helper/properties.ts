@@ -13,6 +13,7 @@ text: "this is text" (text type)
 
 const GITHUB_ISSUE_PROPERTY_CODE = 'github_issue';
 const GITHUB_REPO_PROPERTY_CODE = 'github_repo';
+const GITHUB_ISSUE_TITLE_PROPERTY_CODE = 'github_issue_title';
 const PROPERTIES_DELIMITER = '---';
 
 export function readProperties(data: string): {
@@ -125,7 +126,7 @@ export function getEffectiveRepoSettings(data: string, settings: any): {owner: s
  */
 export function writeAllGithubProperties(
 	data: string,
-	properties: { issueId?: string; repo?: string }
+	properties: { issueId?: string; repo?: string; issueTitle?: string }
 ): string {
 	const { properties: existingProps } = readProperties(data);
 	
@@ -135,12 +136,14 @@ export function writeAllGithubProperties(
 	// Add all existing properties except github_* ones that we'll replace
 	if (existingProps) {
 		const otherProps = existingProps.filter(
-			p => !p.startsWith(GITHUB_ISSUE_PROPERTY_CODE) && !p.startsWith(GITHUB_REPO_PROPERTY_CODE)
+			p => !p.startsWith(GITHUB_ISSUE_PROPERTY_CODE) && 
+				!p.startsWith(GITHUB_REPO_PROPERTY_CODE) && 
+				!p.startsWith(GITHUB_ISSUE_TITLE_PROPERTY_CODE)
 		);
 		result.push(...otherProps);
 	}
 	
-	// Always include both GitHub properties to ensure they're not lost
+	// Always include all GitHub properties to ensure they're not lost
 	if (properties.issueId !== undefined) {
 		result.push(`${GITHUB_ISSUE_PROPERTY_CODE}: ${properties.issueId}`);
 	} else {
@@ -161,8 +164,43 @@ export function writeAllGithubProperties(
 		}
 	}
 	
+	// Add the issue title property if provided
+	if (properties.issueTitle !== undefined) {
+		result.push(`${GITHUB_ISSUE_TITLE_PROPERTY_CODE}: ${properties.issueTitle}`);
+	} else {
+		// Try to preserve existing issue title if available
+		const existingIssueTitle = readIssueTitle(data);
+		if (existingIssueTitle) {
+			result.push(`${GITHUB_ISSUE_TITLE_PROPERTY_CODE}: ${existingIssueTitle}`);
+		}
+	}
+	
 	// Close properties section
 	result.push(PROPERTIES_DELIMITER);
 	
 	return result.join('\n');
+}
+
+export function readIssueTitle(data: string) {
+	const { properties } = readProperties(data);
+	if (!properties) return;
+
+	const githubIssueTitleProperty = properties.find((p) => p.startsWith(GITHUB_ISSUE_TITLE_PROPERTY_CODE));
+	if (!githubIssueTitleProperty) return;
+
+	const [, issueTitle] = githubIssueTitleProperty.split(':');
+	return issueTitle.trim();
+}
+
+export function writeIssueTitle(data: string, issueTitle: string) {
+	const { properties } = readProperties(data);
+
+	return [
+		PROPERTIES_DELIMITER,
+		...(properties
+			? [...properties.filter((p) => !p.includes(GITHUB_ISSUE_TITLE_PROPERTY_CODE))]
+			: []),
+		`${GITHUB_ISSUE_TITLE_PROPERTY_CODE}: ${issueTitle}`,
+		PROPERTIES_DELIMITER
+	].join('\n');
 }

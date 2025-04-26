@@ -22,10 +22,14 @@ async function updateFile(
 		
 		console.log(`Preserving repository override: ${repoOverride || 'none'}`);
 		
-		// Use the new function that ensures both properties are preserved
+		 // Store the original title from the response if available
+		const originalTitle = title || res.json.title;
+		
+		// Use the new function that ensures all properties are preserved
 		const updatedProperties = PropertiesHelper.writeAllGithubProperties(dataToUse, {
 			issueId: res.json.number.toString(),
-			repo: repoOverride  // Always use the override from original file
+			repo: repoOverride,  // Always use the override from original file
+			issueTitle: originalTitle // Store the original unsanitized title
 		});
 		
 		// Make sure file.file is not null before using it
@@ -206,19 +210,23 @@ export async function createNewIssueNote(
 		if (res.status !== 200) {
 			throw new Error(`Failed to fetch issue #${issueIdToUse}: Status ${res.status}`);
 		}
+
+		// Store the original unsanitized title
+		const originalTitle = res.json.title || `Issue-${issueIdToUse}`;
 		
 		// Determine the parent folder path for creating the new note
 		const parentPath = file.file.parent?.path || '';
 		
-		// Sanitize the title to create a valid filename
-		const sanitizedTitle = sanitizeFilename(res.json.title || `Issue-${issueIdToUse}`);
+		// Sanitize the title to create a valid filename, but keep original title separately
+		const sanitizedTitle = sanitizeFilename(originalTitle);
 		const newFilename = `${sanitizedTitle}.md`;
 		const fullPath = parentPath ? `${parentPath}/${newFilename}` : newFilename;
 		
-		// Create initial content with GitHub properties and the issue body
+		// Create initial content with GitHub properties including original title
 		const initialContent = PropertiesHelper.writeAllGithubProperties('', {
 			issueId: issueIdToUse,
-			repo: PropertiesHelper.readRepo(file.data)  // Keep the same repo override if any
+			repo: PropertiesHelper.readRepo(file.data),  // Keep the same repo override if any
+			issueTitle: originalTitle // Store the original unsanitized title
 		});
 		
 		// Create the new file with issue content
@@ -227,7 +235,7 @@ export async function createNewIssueNote(
 			`${initialContent}\n\n${res.json.body || 'No content'}`
 		);
 		
-		 // IMPORTANT: Open the file in a way that preserves the sidebar
+		// IMPORTANT: Open the file in a way that preserves the sidebar
 		// Instead of using activeLeaf (which could be the sidebar),
 		// create or use a different leaf in the main editor area
 		try {
