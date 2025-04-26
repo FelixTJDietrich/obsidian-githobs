@@ -140,7 +140,13 @@ export class GithubIssueControlsView extends ItemView {
 					value: repoOverride || '',
 					onChange: async (val) => {
 						if (fileOpened.file) {
-							const updatedData = PropertiesHelper.writeRepo(fileOpened.data, val);
+							// Use the new helper that preserves all GitHub properties
+							const issueId = PropertiesHelper.readIssueId(fileOpened.data);
+							const updatedData = PropertiesHelper.writeAllGithubProperties(fileOpened.data, {
+								issueId: issueId, 
+								repo: val
+							});
+							
 							await this.app.vault.modify(fileOpened.file, updatedData);
 							this.reload(editor);
 							new Notice(`Repository override ${val ? 'set to: ' + val : 'cleared'}`);
@@ -164,8 +170,11 @@ export class GithubIssueControlsView extends ItemView {
 			button: {
 				icon: 'refresh-ccw',
 				action: async () => {
-					if (!this.issueId || !fileOpened.file) {
-						new Notice('No issue ID or file found');
+					// Use the issue ID from properties if it exists, or from the input field
+					const issueIdToUse = this.issueId || PropertiesHelper.readIssueId(fileOpened.data);
+					
+					if (!issueIdToUse || !fileOpened.file) {
+						new Notice('Cannot fetch: No issue ID found in properties or input field');
 						return;
 					}
 
@@ -175,13 +184,22 @@ export class GithubIssueControlsView extends ItemView {
 						new Notice(`Fetching from ${effectiveSettings.owner}/${effectiveSettings.repo}...`);
 						
 						const fetchedIssue = await fetchIssue(
-							this.issueId,
+							issueIdToUse,
 							this.settings,
 							fileOpened.file
 						);
 						this.setFetchDate(fetchedIssue.date);
 						this.status = fetchedIssue.status;
 						this.reload(editor);
+						
+						// Show feedback on status
+						if (fetchedIssue.status === GitHubIssueStatus.CanPull) {
+							new Notice(`Issue #${issueIdToUse} has updates available to pull`);
+						} else if (fetchedIssue.status === GitHubIssueStatus.CanPush) {
+							new Notice(`Your local changes to issue #${issueIdToUse} can be pushed`);
+						} else {
+							new Notice(`Issue #${issueIdToUse} is up-to-date`);
+						}
 					} catch (error) {
 						console.error("Error fetching:", error);
 						new Notice(`Fetch failed: ${error.message || 'Unknown error'}`);
@@ -197,14 +215,37 @@ export class GithubIssueControlsView extends ItemView {
 			button: {
 				icon: 'upload',
 				action: async () => {
-					await pushIssue(this.issueId, fileOpened, this.settings);
-					this.status = undefined;
-					this.reload(editor);
+					// Use the issue ID from properties if it exists, or from the input field
+					const issueIdToUse = this.issueId || PropertiesHelper.readIssueId(fileOpened.data);
+					
+					if (!issueIdToUse && !fileOpened.file) {
+						new Notice('Cannot push: No issue ID found in properties or input field');
+						return;
+					}
+					
+					try {
+						await pushIssue(issueIdToUse, fileOpened, this.settings);
+						this.status = undefined;
+						// Update the display to show the new issue ID if one was assigned
+						this.setIssueId(PropertiesHelper.readIssueId(fileOpened.data));
+						this.reload(editor);
+						
+						// Show feedback about which issue was updated
+						const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(fileOpened.data, this.settings);
+						new Notice(`Issue ${issueIdToUse ? 'updated' : 'created'} in ${effectiveSettings.owner}/${effectiveSettings.repo}`);
+					} catch (error) {
+						console.error("Error pushing issue:", error);
+						new Notice(`Push failed: ${error.message || 'Unknown error'}`);
+					}
 				}
 			}
 		});
 
-		if (this.issueId) {
+		// Update the conditional rendering of the Pull button to always show when there's an issue ID
+		// either in the input or properties
+		const issueIdToUse = this.issueId || PropertiesHelper.readIssueId(fileOpened.data);
+
+		if (issueIdToUse) {
 			createInfoSection(viewContainer, {
 				info: 'Pull',
 				description:
@@ -214,9 +255,20 @@ export class GithubIssueControlsView extends ItemView {
 				button: {
 					icon: 'download',
 					action: async () => {
-						await pullIssue(this.issueId!, fileOpened, this.settings);
-						this.status = undefined;
-						this.reload(editor);
+						try {
+							// Show a notice about which repo we're using
+							const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(fileOpened.data, this.settings);
+							new Notice(`Pulling from ${effectiveSettings.owner}/${effectiveSettings.repo}...`);
+							
+							await pullIssue(issueIdToUse, fileOpened, this.settings);
+							this.status = undefined;
+							this.reload(editor);
+							
+							new Notice(`Successfully pulled issue #${issueIdToUse}`);
+						} catch (error) {
+							console.error("Error pulling issue:", error);
+							new Notice(`Pull failed: ${error.message || 'Unknown error'}`);
+						}
 					}
 				}
 			});

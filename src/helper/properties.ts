@@ -116,3 +116,53 @@ export function getEffectiveRepoSettings(data: string, settings: any): {owner: s
 		token: settings.token,
 	};
 }
+
+/**
+ * Write all GitHub properties at once, ensuring none are lost
+ * @param data The file content
+ * @param properties Object containing github_issue and github_repo values
+ * @returns Updated file content with properties
+ */
+export function writeAllGithubProperties(
+	data: string,
+	properties: { issueId?: string; repo?: string }
+): string {
+	const { properties: existingProps } = readProperties(data);
+	
+	// Start with the properties delimiter
+	const result = [PROPERTIES_DELIMITER];
+	
+	// Add all existing properties except github_* ones that we'll replace
+	if (existingProps) {
+		const otherProps = existingProps.filter(
+			p => !p.startsWith(GITHUB_ISSUE_PROPERTY_CODE) && !p.startsWith(GITHUB_REPO_PROPERTY_CODE)
+		);
+		result.push(...otherProps);
+	}
+	
+	// Always include both GitHub properties to ensure they're not lost
+	if (properties.issueId !== undefined) {
+		result.push(`${GITHUB_ISSUE_PROPERTY_CODE}: ${properties.issueId}`);
+	} else {
+		// Try to preserve existing issue ID if available
+		const existingIssueId = readIssueId(data);
+		if (existingIssueId) {
+			result.push(`${GITHUB_ISSUE_PROPERTY_CODE}: ${existingIssueId}`);
+		}
+	}
+	
+	if (properties.repo !== undefined) {
+		result.push(`${GITHUB_REPO_PROPERTY_CODE}: ${properties.repo}`);
+	} else {
+		// Try to preserve existing repo if available
+		const existingRepo = readRepo(data);
+		if (existingRepo) {
+			result.push(`${GITHUB_REPO_PROPERTY_CODE}: ${existingRepo}`);
+		}
+	}
+	
+	// Close properties section
+	result.push(PROPERTIES_DELIMITER);
+	
+	return result.join('\n');
+}

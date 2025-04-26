@@ -12,47 +12,79 @@ async function updateFile(
 	title?: string
 ) {
 	try {
-		// First, read any existing repo override to ensure we preserve it
-		const repoOverride = PropertiesHelper.readRepo(externalData ?? file.data);
+		// Get the original data and external data
+		const originalData = file.data;
+		const dataToUse = externalData ?? originalData;
 		
-		// Create properties with issue ID
-		let updatedProperties = PropertiesHelper.writeIssueId(
-			externalData ?? file.data,
-			res.json.number
-		);
+		// IMPORTANT: Read the repository override from the original file data, NOT from the external data (GitHub content)
+		// This ensures we always keep our local repo override even when pulling changes
+		const repoOverride = PropertiesHelper.readRepo(originalData);
 		
-		// If there was a repo override, make sure we keep it
-		if (repoOverride) {
-			updatedProperties = PropertiesHelper.writeRepo(updatedProperties, repoOverride);
-		}
+		console.log(`Preserving repository override: ${repoOverride || 'none'}`);
 		
-		 // Make sure file.file is not null before using it
+		// Use the new function that ensures both properties are preserved
+		const updatedProperties = PropertiesHelper.writeAllGithubProperties(dataToUse, {
+			issueId: res.json.number.toString(),
+			repo: repoOverride  // Always use the override from original file
+		});
+		
+		// Make sure file.file is not null before using it
 		if (!file.file) {
 			throw new Error('File reference is null');
 		}
 		
-		// Handle renaming if needed
+		// Handle renaming if needed, but only if title is provided
 		if (title) {
-			await window.app.vault.rename(
-				file.file,
-				file.file.parent?.path === '/'
-					? `${title}.md`
-					: `${file.file.parent?.path}/${title}.md`
-			);
+			try {
+				// Sanitize the title to remove characters that aren't allowed in filenames
+				const sanitizedTitle = sanitizeFilename(title);
+				
+				// Only proceed with renaming if we have a valid sanitized title
+				if (sanitizedTitle) {
+					const newPath = file.file.parent?.path === '/'
+						? `${sanitizedTitle}.md`
+						: `${file.file.parent?.path}/${sanitizedTitle}.md`;
+					
+					console.log(`Renaming file to: ${newPath}`);
+					await window.app.vault.rename(file.file, newPath);
+				} else {
+					console.log("Skipping rename: Title couldn't be sanitized properly");
+				}
+			} catch (renameError) {
+				// If renaming fails, log it but continue with updating content
+				console.error("Error renaming file:", renameError);
+				new Notice(`Could not rename file, but content will be updated`);
+			}
 		}
 
 		// Update the file content while preserving properties
 		await window.app.vault.modify(
 			file.file,
-			`${updatedProperties}\n${PropertiesHelper.removeProperties(
-				externalData ?? file.data
-			)}`,
+			`${updatedProperties}\n${PropertiesHelper.removeProperties(dataToUse)}`,
 			{ mtime: new Date(res.json.updated_at).getTime() }
 		);
+		
+		console.log("File updated successfully with preserved properties");
 	} catch (error) {
 		console.error("Error updating file:", error);
 		throw new Error('Error updating file: ' + (error.message || 'This issue is already tracked'));
 	}
+}
+
+// Helper function to sanitize filenames
+function sanitizeFilename(filename: string): string {
+	// Replace characters that aren't allowed in filenames
+	let sanitized = filename
+		.replace(/[\\/:*?"<>|]/g, '_') // Replace invalid chars with underscores
+		.replace(/\s+/g, ' ')          // Normalize whitespace
+		.trim();                       // Remove leading/trailing whitespace
+	
+	// If nothing remains after sanitizing, use a fallback name
+	if (!sanitized) {
+		sanitized = "Issue";
+	}
+	
+	return sanitized;
 }
 
 export async function pushIssue(
