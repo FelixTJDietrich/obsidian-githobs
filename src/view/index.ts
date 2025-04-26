@@ -96,12 +96,15 @@ export class GithubIssueControlsView extends ItemView {
 			return;
 		}
 
+		const repoOverride = PropertiesHelper.readRepo(fileOpened.data);
+		const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(fileOpened.data, this.settings);
+
 		createInfoSection(
 			viewContainer,
 			{
 				info: 'Issue Editor 🦤',
-				description: 'Repo: ',
-				descriptionBold: this.settings.repo
+				description: 'Working with: ',
+				descriptionBold: `${effectiveSettings.owner}/${effectiveSettings.repo}`
 			},
 			true
 		);
@@ -125,14 +128,13 @@ export class GithubIssueControlsView extends ItemView {
 			}
 		});
 
-		const repoOverride = PropertiesHelper.readRepo(fileOpened.data);
-		const effectiveRepo = repoOverride || this.settings.repo;
-
 		createInfoSection(
 			viewContainer,
 			{
-				info: 'Repository:',
-				description: repoOverride ? `Overridden: ${repoOverride}` : `Default: ${this.settings.repo}`,
+				info: 'Repository Override:',
+				description: repoOverride 
+					? `Using: ${effectiveSettings.owner}/${effectiveSettings.repo}` 
+					: `Default: ${this.settings.owner}/${this.settings.repo}`,
 				input: {
 					type: 'text',
 					value: repoOverride || '',
@@ -141,15 +143,21 @@ export class GithubIssueControlsView extends ItemView {
 							const updatedData = PropertiesHelper.writeRepo(fileOpened.data, val);
 							await this.app.vault.modify(fileOpened.file, updatedData);
 							this.reload(editor);
+							new Notice(`Repository override ${val ? 'set to: ' + val : 'cleared'}`);
 						} else {
 							new Notice('No file is currently open.');
 						}
 					}
 				}
-			},
-			true
+			}
 		);
 
+		createInfoSection(viewContainer, {
+			info: '',
+			description: 'Format: "owner/repo" or just "repo"'
+		});
+
+		// Update the fetch button action
 		createInfoSection(viewContainer, {
 			info: 'Fetch',
 			description: this.issueId ? this.fetchDate : 'First push',
@@ -157,17 +165,27 @@ export class GithubIssueControlsView extends ItemView {
 				icon: 'refresh-ccw',
 				action: async () => {
 					if (!this.issueId || !fileOpened.file) {
+						new Notice('No issue ID or file found');
 						return;
 					}
 
-					const fetchedIssue = await fetchIssue(
-						this.issueId,
-						this.settings,
-						fileOpened.file
-					);
-					this.setFetchDate(fetchedIssue.date);
-					this.status = fetchedIssue.status;
-					this.reload(editor);
+					try {
+						// Show a notice about which repo we're using
+						const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(fileOpened.data, this.settings);
+						new Notice(`Fetching from ${effectiveSettings.owner}/${effectiveSettings.repo}...`);
+						
+						const fetchedIssue = await fetchIssue(
+							this.issueId,
+							this.settings,
+							fileOpened.file
+						);
+						this.setFetchDate(fetchedIssue.date);
+						this.status = fetchedIssue.status;
+						this.reload(editor);
+					} catch (error) {
+						console.error("Error fetching:", error);
+						new Notice(`Fetch failed: ${error.message || 'Unknown error'}`);
+					}
 				}
 			}
 		});

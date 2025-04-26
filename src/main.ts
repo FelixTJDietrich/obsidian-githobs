@@ -5,7 +5,9 @@ import { GithubIssueControlsView, GithubIssueControlsViewType } from 'view';
 
 export default class GitHobs extends Plugin {
 	settings: GitHobsSettings;
-	gitHubIssueControlsView: GithubIssueControlsView;
+	
+	// Track whether the view is active
+	private hasActiveView = false;
 
 	private readonly toggleGitHubIssueControlsView = async (): Promise<void> => {
 		const existing = this.app.workspace.getLeavesOfType(GithubIssueControlsViewType);
@@ -24,13 +26,42 @@ export default class GitHobs extends Plugin {
 		);
 	};
 
+	// Helper method to safely reload all instances of our view
+	private reloadViews(): void {
+		const leaves = this.app.workspace.getLeavesOfType(GithubIssueControlsViewType);
+		if (leaves.length === 0) return;
+		
+		for (const leaf of leaves) {
+			const view = leaf.view as GithubIssueControlsView;
+			if (view && view.load) {
+				view.load();
+			}
+		}
+	}
+
 	async onload() {
 		await this.loadSettings();
 
+		// Register the view without directly storing a reference
 		this.registerView(
 			GithubIssueControlsViewType,
-			(leaf) =>
-				(this.gitHubIssueControlsView = new GithubIssueControlsView(leaf, this.settings))
+			(leaf) => new GithubIssueControlsView(leaf, this.settings)
+		);
+
+		// Register for leaf changes to track when our view becomes active
+		this.registerEvent(
+			this.app.workspace.on('layout-change', () => {
+				this.hasActiveView = this.app.workspace.getLeavesOfType(GithubIssueControlsViewType).length > 0;
+			})
+		);
+
+		// Handle file-open by reloading all instances of our view
+		this.registerEvent(
+			this.app.workspace.on('file-open', () => {
+				if (this.hasActiveView) {
+					this.reloadViews();
+				}
+			})
 		);
 
 		this.addRibbonIcon('github', 'Manage a github issue', async () => {
@@ -38,10 +69,6 @@ export default class GitHobs extends Plugin {
 		});
 
 		this.addSettingTab(new SettingTab(this.app, this));
-
-		this.registerEvent(
-			this.app.workspace.on('file-open', () => this.gitHubIssueControlsView.load())
-		);
 	}
 
 	onunload() {}

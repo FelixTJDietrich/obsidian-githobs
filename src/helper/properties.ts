@@ -92,3 +92,27 @@ export function writeRepo(data: string, repo: string) {
 		PROPERTIES_DELIMITER
 	].join('\n');
 }
+
+export function parseRepoOverride(repoString: string | undefined): {owner?: string, repo?: string} {
+	if (!repoString) return {};
+	
+	// Handle the format "owner/repo"
+	if (repoString.includes('/')) {
+		const [owner, repo] = repoString.split('/');
+		return { owner: owner.trim(), repo: repo.trim() };
+	}
+	
+	// Handle just the repo name without owner
+	return { repo: repoString.trim() };
+}
+
+export function getEffectiveRepoSettings(data: string, settings: any): {owner: string, repo: string, token: string} {
+	const repoOverride = readRepo(data);
+	const { owner: overrideOwner, repo: overrideRepo } = parseRepoOverride(repoOverride);
+	
+	return {
+		owner: overrideOwner || settings.owner,
+		repo: overrideRepo || settings.repo,
+		token: settings.token,
+	};
+}

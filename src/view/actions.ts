@@ -12,29 +12,46 @@ async function updateFile(
 	title?: string
 ) {
 	try {
-		const propertiesWithGithubIssue = PropertiesHelper.writeIssueId(
+		// First, read any existing repo override to ensure we preserve it
+		const repoOverride = PropertiesHelper.readRepo(externalData ?? file.data);
+		
+		// Create properties with issue ID
+		let updatedProperties = PropertiesHelper.writeIssueId(
 			externalData ?? file.data,
 			res.json.number
 		);
-
+		
+		// If there was a repo override, make sure we keep it
+		if (repoOverride) {
+			updatedProperties = PropertiesHelper.writeRepo(updatedProperties, repoOverride);
+		}
+		
+		 // Make sure file.file is not null before using it
+		if (!file.file) {
+			throw new Error('File reference is null');
+		}
+		
+		// Handle renaming if needed
 		if (title) {
-			await this.app.vault.rename(
+			await window.app.vault.rename(
 				file.file,
-				file.file?.parent?.path === '/'
+				file.file.parent?.path === '/'
 					? `${title}.md`
-					: `${file.file?.parent?.path}/${title}.md`
+					: `${file.file.parent?.path}/${title}.md`
 			);
 		}
 
-		await this.app.vault.modify(
+		// Update the file content while preserving properties
+		await window.app.vault.modify(
 			file.file,
-			`${propertiesWithGithubIssue}\n${PropertiesHelper.removeProperties(
+			`${updatedProperties}\n${PropertiesHelper.removeProperties(
 				externalData ?? file.data
 			)}`,
 			{ mtime: new Date(res.json.updated_at).getTime() }
 		);
-	} catch {
-		throw new Error('This issue is already tracked');
+	} catch (error) {
+		console.error("Error updating file:", error);
+		throw new Error('Error updating file: ' + (error.message || 'This issue is already tracked'));
 	}
 }
 
@@ -43,8 +60,11 @@ export async function pushIssue(
 	file: MarkdownFile,
 	settings: GitHobsSettings
 ) {
+	// Use the effective settings that take into account any repository override
+	const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(file.data, settings);
+	
 	if (issueId) {
-		const res = await Api.updateIssue(settings, issueId, {
+		const res = await Api.updateIssue(effectiveSettings, issueId, {
 			title: file.file?.basename ?? '',
 			body: PropertiesHelper.removeProperties(file.data)
 		});
@@ -55,7 +75,7 @@ export async function pushIssue(
 		return;
 	}
 
-	const res = await Api.createIssue(settings, {
+	const res = await Api.createIssue(effectiveSettings, {
 		title: file.file?.basename ?? '',
 		body: PropertiesHelper.removeProperties(file.data)
 	});
@@ -66,26 +86,46 @@ export async function pushIssue(
 }
 
 export async function fetchIssue(issueId: string, settings: GitHobsSettings, file: TFile) {
-	const res = await Api.getIssue(settings, issueId);
+	try {
+		// Use app from global scope to read file content
+		const app = window.app;
+		const fileData = await app.vault.read(file);
+		const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(fileData, settings);
+		
+		// Log for debugging
+		console.log(`Fetching issue from: ${effectiveSettings.owner}/${effectiveSettings.repo}`);
+		
+		const res = await Api.getIssue(effectiveSettings, issueId);
 
-	const fileRead = this.app.vault.getFiles().find((f: TFile) => f.path === file.path);
-	const lastDate = fileRead.stat.mtime;
+		const fileRead = app.vault.getFiles().find((f: TFile) => f.path === file.path);
+		// Check if fileRead is defined before accessing its properties
+		let status: GitHubIssueStatus | undefined = undefined;
 
-	let status: GitHubIssueStatus | undefined = undefined;
+		if (fileRead && fileRead.stat) {
+			const lastDate = fileRead.stat.mtime;
 
-	if (lastDate && new Date(res.json.updated_at) > new Date(lastDate)) {
-		status = GitHubIssueStatus.CanPull;
+			if (lastDate && new Date(res.json.updated_at) > new Date(lastDate)) {
+				status = GitHubIssueStatus.CanPull;
+			}
+
+			if (lastDate && new Date(res.json.updated_at) < new Date(lastDate)) {
+				status = GitHubIssueStatus.CanPush;
+			}
+		}
+
+		return { date: res.json.updated_at, status };
+	} catch (error) {
+		console.error("Error in fetchIssue:", error);
+		new Notice(`Error fetching issue: ${error.message || "Unknown error"}`);
+		return { date: "Error", status: undefined };
 	}
-
-	if (lastDate && new Date(res.json.updated_at) < new Date(lastDate)) {
-		status = GitHubIssueStatus.CanPush;
-	}
-
-	return { date: res.json.updated_at, status };
 }
 
 export async function pullIssue(issueId: string, file: MarkdownFile, settings: GitHobsSettings) {
-	const res = await Api.getIssue(settings, issueId);
+	// Use the effective settings that take into account any repository override
+	const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(file.data, settings);
+	
+	const res = await Api.getIssue(effectiveSettings, issueId);
 	await updateFile(file, res, res.json.body, res.json.title);
 }
 
@@ -95,10 +135,17 @@ export async function changeIssueId(
 	settings: GitHobsSettings
 ) {
 	try {
-		await pullIssue(issueId, file, settings);
-
-		new Notice('Issue changed!');
+		// Get effective settings from the file data
+		const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(file.data, settings);
+		
+		// Log for debugging
+		console.log(`Changing issue ID using repo: ${effectiveSettings.owner}/${effectiveSettings.repo}`);
+		
+		// Use effective settings when pulling the issue
+		await pullIssue(issueId, file, effectiveSettings);
+		new Notice(`Issue changed in ${effectiveSettings.owner}/${effectiveSettings.repo}!`);
 	} catch (err) {
-		new Notice(err);
+		console.error("Error changing issue ID:", err);
+		new Notice(`Error changing issue: ${err.message || err}`);
 	}
 }
