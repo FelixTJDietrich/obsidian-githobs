@@ -12,6 +12,7 @@ text: "this is text" (text type)
 */
 
 const GITHUB_ISSUE_PROPERTY_CODE = 'github_issue';
+const GITHUB_REPO_PROPERTY_CODE = 'github_repo';
 const PROPERTIES_DELIMITER = '---';
 
 export function readProperties(data: string): {
@@ -64,6 +65,30 @@ export function writeIssueId(data: string, issueId: string) {
 			? [...properties.filter((p) => !p.includes(GITHUB_ISSUE_PROPERTY_CODE))]
 			: []),
 		`${GITHUB_ISSUE_PROPERTY_CODE}: ${issueId}`,
+		PROPERTIES_DELIMITER
+	].join('\n');
+}
+
+export function readRepo(data: string) {
+	const { properties } = readProperties(data);
+	if (!properties) return;
+
+	const githubRepoProperty = properties.find((p) => p.startsWith(GITHUB_REPO_PROPERTY_CODE));
+	if (!githubRepoProperty) return;
+
+	const [, repo] = githubRepoProperty.split(':');
+	return repo.trim();
+}
+
+export function writeRepo(data: string, repo: string) {
+	const { properties } = readProperties(data);
+
+	return [
+		PROPERTIES_DELIMITER,
+		...(properties
+			? [...properties.filter((p) => !p.includes(GITHUB_REPO_PROPERTY_CODE))]
+			: []),
+		`${GITHUB_REPO_PROPERTY_CODE}: ${repo}`,
 		PROPERTIES_DELIMITER
 	].join('\n');
 }

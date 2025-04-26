@@ -125,6 +125,31 @@ export class GithubIssueControlsView extends ItemView {
 			}
 		});
 
+		const repoOverride = PropertiesHelper.readRepo(fileOpened.data);
+		const effectiveRepo = repoOverride || this.settings.repo;
+
+		createInfoSection(
+			viewContainer,
+			{
+				info: 'Repository:',
+				description: repoOverride ? `Overridden: ${repoOverride}` : `Default: ${this.settings.repo}`,
+				input: {
+					type: 'text',
+					value: repoOverride || '',
+					onChange: async (val) => {
+						if (fileOpened.file) {
+							const updatedData = PropertiesHelper.writeRepo(fileOpened.data, val);
+							await this.app.vault.modify(fileOpened.file, updatedData);
+							this.reload(editor);
+						} else {
+							new Notice('No file is currently open.');
+						}
+					}
+				}
+			},
+			true
+		);
+
 		createInfoSection(viewContainer, {
 			info: 'Fetch',
 			description: this.issueId ? this.fetchDate : 'First push',
