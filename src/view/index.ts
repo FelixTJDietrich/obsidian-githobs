@@ -39,7 +39,11 @@ export class GithubIssueControlsView extends ItemView {
 		this.fetchDate = undefined;
 		this.status = undefined;
 		this.issueId = undefined;
-		this.draw();
+		
+		// Add a small delay before drawing to ensure the activeEditor is properly updated
+		setTimeout(() => {
+			this.draw();
+		}, 50);
 	}
 
 	public setFetchDate(fetchDate: string) {
@@ -52,7 +56,10 @@ export class GithubIssueControlsView extends ItemView {
 
 	public reload(editor: MarkdownView | null) {
 		editor?.editor.focus();
-		this.draw();
+		// Add a small delay to ensure the activeEditor is fully updated
+		setTimeout(() => {
+			this.draw();
+		}, 50);
 	}
 
 	private readonly draw = (): void => {
@@ -144,6 +151,36 @@ export class GithubIssueControlsView extends ItemView {
 			}
 		});
 
+		// After the Issue number section, add a new section for Issue Title
+		createInfoSection(viewContainer, {
+			info: 'Issue Title:',
+			description: 'Edit to rename on next push',
+			input: {
+				type: 'text',
+				value: PropertiesHelper.readIssueTitle(fileOpened.data) || '',
+				onChange: async (val) => {
+					if (fileOpened.file) {
+						// Use the helper that preserves all GitHub properties
+						const issueId = PropertiesHelper.readIssueId(fileOpened.data);
+						const repoOverride = PropertiesHelper.readRepo(fileOpened.data);
+						
+						const updatedData = PropertiesHelper.writeAllGithubProperties(fileOpened.data, {
+							issueId: issueId,
+							repo: repoOverride,
+							issueTitle: val
+						});
+						
+						await this.app.vault.modify(fileOpened.file, updatedData);
+						this.reload(editor);
+						
+						new Notice(`Issue title updated. Push to apply changes to GitHub.`);
+					} else {
+						new Notice('No file is currently open.');
+					}
+				}
+			}
+		});
+
 		createInfoSection(
 			viewContainer,
 			{
@@ -186,43 +223,43 @@ export class GithubIssueControlsView extends ItemView {
 			button: {
 				icon: 'refresh-ccw',
 				action: async () => {
-					// Use the issue ID from properties if it exists, or from the input field
-					const issueIdToUse = this.issueId || PropertiesHelper.readIssueId(fileOpened.data);
-					
-					if (!issueIdToUse || !fileOpened.file) {
-						new Notice('Cannot fetch: No issue ID found in properties or input field');
-						return;
-					}
-
-					try {
-						// Show a notice about which repo we're using
-						const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(fileOpened.data, this.settings);
-						new Notice(`Fetching from ${effectiveSettings.owner}/${effectiveSettings.repo}...`);
+						// ALWAYS use the issue ID from the current note's properties first
+						const issueFromNote = PropertiesHelper.readIssueId(fileOpened.data);
 						
-						const fetchedIssue = await fetchIssue(
-							issueIdToUse,
-							this.settings,
-							fileOpened.file
-						);
-						this.setFetchDate(fetchedIssue.date);
-						this.status = fetchedIssue.status;
-						this.reload(editor);
-						
-						// Show feedback on status
-						if (fetchedIssue.status === GitHubIssueStatus.CanPull) {
-							new Notice(`Issue #${issueIdToUse} has updates available to pull`);
-						} else if (fetchedIssue.status === GitHubIssueStatus.CanPush) {
-							new Notice(`Your local changes to issue #${issueIdToUse} can be pushed`);
-						} else {
-							new Notice(`Issue #${issueIdToUse} is up-to-date`);
+						if (!issueFromNote || !fileOpened.file) {
+							new Notice('Cannot fetch: No issue ID found in the current note');
+							return;
 						}
-					} catch (error) {
-						console.error("Error fetching:", error);
-						new Notice(`Fetch failed: ${error.message || 'Unknown error'}`);
+		
+						try {
+							// Show a notice about which repo we're using
+							const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(fileOpened.data, this.settings);
+							new Notice(`Fetching from ${effectiveSettings.owner}/${effectiveSettings.repo}...`);
+							
+							const fetchedIssue = await fetchIssue(
+								issueFromNote,
+								this.settings,
+								fileOpened.file
+							);
+							this.setFetchDate(fetchedIssue.date);
+							this.status = fetchedIssue.status;
+							this.reload(editor);
+							
+							// Show feedback on status
+							if (fetchedIssue.status === GitHubIssueStatus.CanPull) {
+								new Notice(`Issue #${issueFromNote} has updates available to pull`);
+							} else if (fetchedIssue.status === GitHubIssueStatus.CanPush) {
+								new Notice(`Your local changes to issue #${issueFromNote} can be pushed`);
+							} else {
+								new Notice(`Issue #${issueFromNote} is up-to-date`);
+							}
+						} catch (error) {
+							console.error("Error fetching:", error);
+							new Notice(`Fetch failed: ${error.message || 'Unknown error'}`);
+						}
 					}
 				}
-			}
-		});
+			});
 
 		createInfoSection(viewContainer, {
 			info: 'Push',
@@ -231,24 +268,24 @@ export class GithubIssueControlsView extends ItemView {
 			button: {
 				icon: 'upload',
 				action: async () => {
-					// Use the issue ID from properties if it exists, or from the input field
-					const issueIdToUse = this.issueId || PropertiesHelper.readIssueId(fileOpened.data);
+					// ALWAYS use the issue ID from the current note's properties
+					const issueFromNote = PropertiesHelper.readIssueId(fileOpened.data);
 					
-					if (!issueIdToUse && !fileOpened.file) {
-						new Notice('Cannot push: No issue ID found in properties or input field');
+					if (!issueFromNote && !fileOpened.file) {
+						new Notice('Cannot push: No issue ID found in the current note');
 						return;
 					}
 					
 					try {
-						await pushIssue(issueIdToUse, fileOpened, this.settings);
+						await pushIssue(issueFromNote, fileOpened, this.settings);
 						this.status = undefined;
-						// Update the display to show the new issue ID if one was assigned
+						// Update the display to show the issue ID
 						this.setIssueId(PropertiesHelper.readIssueId(fileOpened.data));
 						this.reload(editor);
 						
 						// Show feedback about which issue was updated
 						const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(fileOpened.data, this.settings);
-						new Notice(`Issue ${issueIdToUse ? 'updated' : 'created'} in ${effectiveSettings.owner}/${effectiveSettings.repo}`);
+						new Notice(`Issue ${issueFromNote ? 'updated' : 'created'} in ${effectiveSettings.owner}/${effectiveSettings.repo}`);
 					} catch (error) {
 						console.error("Error pushing issue:", error);
 						new Notice(`Push failed: ${error.message || 'Unknown error'}`);
@@ -257,11 +294,10 @@ export class GithubIssueControlsView extends ItemView {
 			}
 		});
 
-		// Update the conditional rendering of the Pull button to always show when there's an issue ID
-		// either in the input or properties
-		const issueIdToUse = this.issueId || PropertiesHelper.readIssueId(fileOpened.data);
+		// Update the Pull button to always show when there's an issue ID in the current note
+		const issueFromNote = PropertiesHelper.readIssueId(fileOpened.data);
 
-		if (issueIdToUse) {
+		if (issueFromNote) {
 			createInfoSection(viewContainer, {
 				info: 'Pull',
 				description:
@@ -276,11 +312,11 @@ export class GithubIssueControlsView extends ItemView {
 							const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(fileOpened.data, this.settings);
 							new Notice(`Pulling from ${effectiveSettings.owner}/${effectiveSettings.repo}...`);
 							
-							await pullIssue(issueIdToUse, fileOpened, this.settings);
+							await pullIssue(issueFromNote, fileOpened, this.settings);
 							this.status = undefined;
 							this.reload(editor);
 							
-							new Notice(`Successfully pulled issue #${issueIdToUse}`);
+							new Notice(`Successfully pulled issue #${issueFromNote}`);
 						} catch (error) {
 							console.error("Error pulling issue:", error);
 							new Notice(`Pull failed: ${error.message || 'Unknown error'}`);

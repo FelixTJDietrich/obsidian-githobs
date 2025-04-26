@@ -99,20 +99,45 @@ export async function pushIssue(
 	// Use the effective settings that take into account any repository override
 	const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(file.data, settings);
 	
+	// Check if we have a stored issue title in the properties
+	// If so, use that as the title when pushing to GitHub
+	const storedIssueTitle = PropertiesHelper.readIssueTitle(file.data);
+	
+	// Determine the title to use for the GitHub issue
+	// Priority: 1. Stored issue title from properties, 2. File basename, 3. Empty string
+	const titleToUse = storedIssueTitle || file.file?.basename || '';
+	
 	if (issueId) {
+		console.log(`Pushing issue with title: ${titleToUse}`);
 		const res = await Api.updateIssue(effectiveSettings, issueId, {
-			title: file.file?.basename ?? '',
+			title: titleToUse,
 			body: PropertiesHelper.removeProperties(file.data)
 		});
 
 		if (res.status === 200) {
 			await updateFile(file, res);
+			
+			// If we've updated the title, we should also rename the file to match
+			if (storedIssueTitle && file.file && file.file.basename !== sanitizeFilename(storedIssueTitle)) {
+				try {
+					const sanitizedTitle = sanitizeFilename(storedIssueTitle);
+					const newPath = file.file.parent?.path === '/'
+						? `${sanitizedTitle}.md`
+						: `${file.file.parent?.path}/${sanitizedTitle}.md`;
+					
+					console.log(`Renaming file to match issue title: ${newPath}`);
+					await window.app.vault.rename(file.file, newPath);
+				} catch (renameError) {
+					console.error("Error renaming file after push:", renameError);
+					new Notice(`Could not rename file to match issue title, but issue was updated`);
+				}
+			}
 		}
 		return;
 	}
 
 	const res = await Api.createIssue(effectiveSettings, {
-		title: file.file?.basename ?? '',
+		title: titleToUse,
 		body: PropertiesHelper.removeProperties(file.data)
 	});
 

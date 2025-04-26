@@ -31,12 +31,15 @@ export default class GitHobs extends Plugin {
 		const leaves = this.app.workspace.getLeavesOfType(GithubIssueControlsViewType);
 		if (leaves.length === 0) return;
 		
-		for (const leaf of leaves) {
-			const view = leaf.view as GithubIssueControlsView;
-			if (view && view.load) {
-				view.load();
+		// Schedule the reload with a small delay to ensure the activeEditor is fully updated
+		setTimeout(() => {
+			for (const leaf of leaves) {
+				const view = leaf.view as GithubIssueControlsView;
+				if (view && view.load) {
+					view.load();
+				}
 			}
-		}
+		}, 50);
 	}
 
 	async onload() {
