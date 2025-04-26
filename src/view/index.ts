@@ -3,7 +3,7 @@ import { ItemView, MarkdownView, Notice, WorkspaceLeaf, setIcon } from 'obsidian
 import { GitHobsSettings } from 'settings';
 import { MarkdownFile } from 'types';
 import * as PropertiesHelper from '../helper/properties';
-import { changeIssueId, fetchIssue, pullIssue, pushIssue } from 'view/actions';
+import { changeIssueId, createNewIssueNote, fetchIssue, pullIssue, pushIssue } from 'view/actions';
 
 export const GithubIssueControlsViewType = 'github-issue-controls-view';
 
@@ -111,16 +111,32 @@ export class GithubIssueControlsView extends ItemView {
 
 		createInfoSection(viewContainer, {
 			info: 'Issue number:',
-			button: {
-				icon: 'crosshair',
-				action: async () => {
-					if (!this.issueId) {
-						new Notice('Select a issue id');
-						return;
+			description: 'Track existing or pull to new file',
+			buttons: [
+				{
+					icon: 'crosshair',
+					tooltip: 'Fetch issue by ID',
+					action: async () => {
+						if (!this.issueId) {
+							new Notice('Select an issue ID');
+							return;
+						}
+						return await changeIssueId(this.issueId, fileOpened, this.settings);
 					}
-					return await changeIssueId(this.issueId, fileOpened, this.settings);
+				},
+				{
+					icon: 'file-plus',
+					tooltip: 'Pull issue to new file',
+					action: async () => {
+						if (!this.issueId) {
+							new Notice('Please enter an issue number first');
+							return;
+						}
+						await createNewIssueNote(fileOpened, this.settings, this.issueId);
+						this.reload(editor);
+					}
 				}
-			},
+			],
 			input: {
 				value: this.issueId?.trim() ?? '',
 				type: 'number',
@@ -291,6 +307,7 @@ function createInfoSection(
 		description,
 		descriptionBold,
 		button,
+		buttons,
 		dropdown,
 		input
 	}: {
@@ -298,6 +315,7 @@ function createInfoSection(
 		description?: string;
 		descriptionBold?: string;
 		button?: { icon: string; action: () => Promise<void> };
+		buttons?: { icon: string; tooltip: string; action: () => Promise<void> }[];
 		dropdown?: { items: { text: string; value: string }[] };
 		input?: { type: string; value: string; onChange: (val: string) => Promise<void> };
 	},
@@ -327,7 +345,7 @@ function createInfoSection(
 
 	let settingControl: HTMLDivElement;
 
-	if (button || dropdown || input) {
+	if (button || buttons || dropdown || input) {
 		settingControl = i.createDiv({ cls: 'setting-item-control' });
 
 		if (input) {
@@ -360,6 +378,22 @@ function createInfoSection(
 				setIcon(btn, button.icon);
 				btn.removeAttribute('disabled');
 			};
+		}
+
+		if (buttons) {
+			buttons.forEach((btnConfig) => {
+				const btn = settingControl.createEl('button');
+				setIcon(btn, btnConfig.icon);
+				btn.setAttribute('aria-label', btnConfig.tooltip);
+
+				btn.onclick = async () => {
+					setIcon(btn, 'hourglass');
+					btn.setAttr('disabled', '');
+					await btnConfig.action();
+					setIcon(btn, btnConfig.icon);
+					btn.removeAttribute('disabled');
+				};
+			});
 		}
 	}
 

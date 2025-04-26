@@ -181,3 +181,68 @@ export async function changeIssueId(
 		new Notice(`Error changing issue: ${err.message || err}`);
 	}
 }
+
+export async function createNewIssueNote(
+	file: MarkdownFile | null,
+	settings: GitHobsSettings,
+	issueIdToUse?: string
+) {
+	try {
+		if (!file || !file.file) {
+			throw new Error('No file context available');
+		}
+
+		if (!issueIdToUse) {
+			throw new Error('No issue ID provided. Please enter an issue number first.');
+		}
+
+		// Get the effective repository settings
+		const effectiveSettings = PropertiesHelper.getEffectiveRepoSettings(file.data, settings);
+		
+		// First, fetch the issue to get its title and content
+		new Notice(`Fetching issue #${issueIdToUse} from ${effectiveSettings.owner}/${effectiveSettings.repo}...`);
+		const res = await Api.getIssue(effectiveSettings, issueIdToUse);
+		
+		if (res.status !== 200) {
+			throw new Error(`Failed to fetch issue #${issueIdToUse}: Status ${res.status}`);
+		}
+		
+		// Determine the parent folder path for creating the new note
+		const parentPath = file.file.parent?.path || '';
+		
+		// Sanitize the title to create a valid filename
+		const sanitizedTitle = sanitizeFilename(res.json.title || `Issue-${issueIdToUse}`);
+		const newFilename = `${sanitizedTitle}.md`;
+		const fullPath = parentPath ? `${parentPath}/${newFilename}` : newFilename;
+		
+		// Create initial content with GitHub properties and the issue body
+		const initialContent = PropertiesHelper.writeAllGithubProperties('', {
+			issueId: issueIdToUse,
+			repo: PropertiesHelper.readRepo(file.data)  // Keep the same repo override if any
+		});
+		
+		// Create the new file with issue content
+		const newFile = await window.app.vault.create(
+			fullPath,
+			`${initialContent}\n\n${res.json.body || 'No content'}`
+		);
+		
+		 // IMPORTANT: Open the file in a way that preserves the sidebar
+		// Instead of using activeLeaf (which could be the sidebar),
+		// create or use a different leaf in the main editor area
+		try {
+			// Get the main workspace area and open the file there
+			await window.app.workspace.getLeaf(false).openFile(newFile);
+		} catch (openError) {
+			console.error("Error opening new file:", openError);
+			new Notice(`File created but couldn't be opened automatically`);
+		}
+		
+		new Notice(`Successfully pulled issue #${issueIdToUse} to a new file`);
+		return true;
+	} catch (error) {
+		console.error("Error pulling GitHub issue:", error);
+		new Notice(`Failed to pull GitHub issue: ${error.message || "Unknown error"}`);
+		return false;
+	}
+}
