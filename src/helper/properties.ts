@@ -53,7 +53,10 @@ export function readIssueId(data: string) {
 	const githubIssueProperty = properties.find((p) => p.startsWith(GITHUB_ISSUE_PROPERTY_CODE));
 	if (!githubIssueProperty) return;
 
-	const [, issueId] = githubIssueProperty.split(':');
+	// Extract everything after the property name and first colon
+	const propertyPrefix = `${GITHUB_ISSUE_PROPERTY_CODE}:`;
+	const issueId = githubIssueProperty.substring(propertyPrefix.length).trim();
+	
 	return issueId;
 }
 
@@ -77,8 +80,11 @@ export function readRepo(data: string) {
 	const githubRepoProperty = properties.find((p) => p.startsWith(GITHUB_REPO_PROPERTY_CODE));
 	if (!githubRepoProperty) return;
 
-	const [, repo] = githubRepoProperty.split(':');
-	return repo.trim();
+	// Extract everything after the property name and first colon
+	const propertyPrefix = `${GITHUB_REPO_PROPERTY_CODE}:`;
+	const repo = githubRepoProperty.substring(propertyPrefix.length).trim();
+	
+	return repo;
 }
 
 export function writeRepo(data: string, repo: string) {
@@ -107,7 +113,7 @@ export function parseRepoOverride(repoString: string | undefined): {owner?: stri
 	return { repo: repoString.trim() };
 }
 
-export function getEffectiveRepoSettings(data: string, settings: any): {owner: string, repo: string, token: string} {
+export function getEffectiveRepoSettings(data: string, settings: {owner: string, repo: string, token: string}): {owner: string, repo: string, token: string} {
 	const repoOverride = readRepo(data);
 	const { owner: overrideOwner, repo: overrideRepo } = parseRepoOverride(repoOverride);
 	
@@ -124,6 +130,24 @@ export function getEffectiveRepoSettings(data: string, settings: any): {owner: s
  * @param properties Object containing github_issue and github_repo values
  * @returns Updated file content with properties
  */
+/**
+ * Helper function to escape special characters in YAML strings
+ * @param str The string to escape
+ * @returns Properly escaped YAML string
+ */
+function escapeYamlString(str: string): string {
+	// Return empty string if input is undefined or null
+	if (!str) return '';
+	
+	// If the string contains any of these characters, wrap it in double quotes
+	if (/[:`'"{}[\]|><!?*&$%@#\\]/.test(str) || str.includes('\n')) {
+		// Escape double quotes inside the string
+		const escapedStr = str.replace(/"/g, '\\"');
+		return `"${escapedStr}"`;
+	}
+	return str;
+}
+
 export function writeAllGithubProperties(
 	data: string,
 	properties: { issueId?: string; repo?: string; issueTitle?: string }
@@ -166,12 +190,26 @@ export function writeAllGithubProperties(
 	
 	// Add the issue title property if provided
 	if (properties.issueTitle !== undefined) {
-		result.push(`${GITHUB_ISSUE_TITLE_PROPERTY_CODE}: ${properties.issueTitle}`);
+		// Add debug logging
+		console.log(`Original issue title: "${properties.issueTitle}"`);
+		
+		// Properly escape title for YAML if it contains special characters
+		const escapedTitle = escapeYamlString(properties.issueTitle);
+		console.log(`Escaped issue title: ${escapedTitle}`);
+		
+		result.push(`${GITHUB_ISSUE_TITLE_PROPERTY_CODE}: ${escapedTitle}`);
 	} else {
 		// Try to preserve existing issue title if available
 		const existingIssueTitle = readIssueTitle(data);
 		if (existingIssueTitle) {
-			result.push(`${GITHUB_ISSUE_TITLE_PROPERTY_CODE}: ${existingIssueTitle}`);
+			// Add debug logging
+			console.log(`Existing issue title: "${existingIssueTitle}"`);
+			
+			// Also escape the existing title when preserving it
+			const escapedExistingTitle = escapeYamlString(existingIssueTitle);
+			console.log(`Escaped existing title: ${escapedExistingTitle}`);
+			
+			result.push(`${GITHUB_ISSUE_TITLE_PROPERTY_CODE}: ${escapedExistingTitle}`);
 		}
 	}
 	
@@ -183,24 +221,48 @@ export function writeAllGithubProperties(
 
 export function readIssueTitle(data: string) {
 	const { properties } = readProperties(data);
-	if (!properties) return;
+	if (!properties) {
+		console.log('No properties found in the data');
+		return;
+	}
 
 	const githubIssueTitleProperty = properties.find((p) => p.startsWith(GITHUB_ISSUE_TITLE_PROPERTY_CODE));
-	if (!githubIssueTitleProperty) return;
+	if (!githubIssueTitleProperty) {
+		console.log('No issue title property found in frontmatter');
+		return;
+	}
 
-	const [, issueTitle] = githubIssueTitleProperty.split(':');
-	return issueTitle.trim();
+	console.log(`Raw issue title property: "${githubIssueTitleProperty}"`);
+
+	// Extract everything after the property name and first colon
+	// This ensures we get the complete title even if it contains colons
+	const propertyPrefix = `${GITHUB_ISSUE_TITLE_PROPERTY_CODE}:`;
+	const titlePart = githubIssueTitleProperty.substring(propertyPrefix.length).trim();
+	
+	console.log(`Extracted title part: "${titlePart}"`);
+	
+	// Handle quoted strings properly
+	if (titlePart.startsWith('"') && titlePart.endsWith('"')) {
+		// Remove the quotes and unescape any escaped quotes inside
+		const unquotedTitle = titlePart.substring(1, titlePart.length - 1).replace(/\\"/g, '"');
+		console.log(`Unquoted title: "${unquotedTitle}"`);
+		return unquotedTitle;
+	}
+	
+	return titlePart;
 }
 
 export function writeIssueTitle(data: string, issueTitle: string) {
 	const { properties } = readProperties(data);
+	// Escape the title for YAML
+	const escapedTitle = escapeYamlString(issueTitle);
 
 	return [
 		PROPERTIES_DELIMITER,
 		...(properties
 			? [...properties.filter((p) => !p.includes(GITHUB_ISSUE_TITLE_PROPERTY_CODE))]
 			: []),
-		`${GITHUB_ISSUE_TITLE_PROPERTY_CODE}: ${issueTitle}`,
+		`${GITHUB_ISSUE_TITLE_PROPERTY_CODE}: ${escapedTitle}`,
 		PROPERTIES_DELIMITER
 	].join('\n');
 }
